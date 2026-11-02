@@ -42,8 +42,22 @@ class LitePCIeTLPHeaderInserter3DWs4DWs(LiteXModule):
             fmt_dict[ "ptm_res"] : header_sel.eq(_4DWS_SEL),
         })
 
+        # Hold the selection until the selected inserter has sent the last beat of its packet. A
+        # 3DW inserter shifts the payload by 3 dwords and can still owe a final beat after it has
+        # accepted the last input beat, while the next packet (possibly a 4DW one) is already
+        # presented on the sink. Switching then strands that beat: the packet goes out without
+        # its tail and `last`, and the stranded beat leaks into the next 3DW packet.
+        header_sel_r = Signal()
+        busy         = Signal()
+        sel          = Signal()
+        self.comb += sel.eq(Mux(busy, header_sel_r, header_sel))
+        self.sync += If(source.valid & source.ready,
+            busy.eq(~source.last),
+            header_sel_r.eq(sel),
+        )
+
         # Header Inserters Mux.
-        self.comb += Case(header_sel, {
+        self.comb += Case(sel, {
             _3DWS_SEL : [
                 sink.connect(header_inserter_3dws.sink),
                 header_inserter_3dws.source.connect(source),
