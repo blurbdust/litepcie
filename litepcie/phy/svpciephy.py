@@ -812,6 +812,25 @@ class SVPCIEPHY(LiteXModule):
             self.comb += self.msi.connect(msi_cdc.sink)
             cfg_msi = msi_cdc.source
 
+        # MSI Request ------------------------------------------------------------------------------
+        # The hard IP sends one MSI per rising edge of app_msi_req and acknowledges it with a single
+        # cycle of app_msi_ack. Driving the request from the queue's valid holds it high from one
+        # queued MSI to the next, so the second never gets an edge: it is neither sent nor
+        # acknowledged, and every MSI after it waits behind it. The request is dropped for one cycle
+        # after each acknowledge.
+        app_msi_req = Signal()
+        app_msi_ack = Signal()
+        self.sync.pcie += [
+            If(app_msi_req,
+                If(app_msi_ack,
+                    app_msi_req.eq(0)
+                )
+            ).Elif(cfg_msi.valid,
+                app_msi_req.eq(1)
+            )
+        ]
+        self.comb += cfg_msi.ready.eq(app_msi_req & app_msi_ack)
+
         # Configuration Space Decode ---------------------------------------------------------------
         # tl_cfg_ctl is a 32-bit window multiplexed over 16 addresses selected by tl_cfg_add. There
         # is no write strobe on Stratix V, so the address is watched for a change and the data
@@ -1125,8 +1144,8 @@ class SVPCIEPHY(LiteXModule):
             i_pm_event                    = 0,
 
             # MSI
-            i_app_msi_req                 = cfg_msi.valid,
-            o_app_msi_ack                 = cfg_msi.ready,
+            i_app_msi_req                 = app_msi_req,
+            o_app_msi_ack                 = app_msi_ack,
             i_app_msi_num                 = 0,
             i_app_msi_tc                  = 0,
             i_aer_msi_num                 = 0,
